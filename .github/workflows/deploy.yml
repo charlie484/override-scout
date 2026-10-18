@@ -1,0 +1,74 @@
+name: Build season data & deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Every 3 hours. During events, live data comes straight from the API on each phone.
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Finished events never change, so they're cached between runs to keep API calls low.
+      - name: Restore VEX API cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/vex
+          key: vex-cache-${{ github.run_id }}
+          restore-keys: vex-cache-
+
+      - name: Build season data (TrueSkill, OPR/DPR/CCWM, Q&A)
+        env:
+          VEX_API_TOKEN: ${{ secrets.VEX_API_TOKEN }}
+        run: |
+          mkdir -p data
+          if [ -z "$VEX_API_TOKEN" ]; then
+            echo "::warning::Add a VEX_API_TOKEN repository secret to publish TrueSkill and season stats."
+          else
+            python scripts/build_data.py --out data --max-events 500 || echo "::warning::Season data build failed; deploying the app without fresh stats."
+          fi
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r index.html config.js manifest.webmanifest sw.js css js assets data _site/
+          # New service worker version only when app code changes (not on every data refresh)
+          BUILD_ID=$(find index.html config.js css js -type f | sort | xargs cat | sha1sum | cut -c1-10)
+          sed -i "s/const BUILD_ID = 'dev';/const BUILD_ID = '${BUILD_ID}';/" _site/sw.js
+          touch _site/.nojekyll
+          du -sh _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

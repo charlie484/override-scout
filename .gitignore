@@ -1,0 +1,14 @@
+# generated locally
+test-data/
+.cache/
+__pycache__/
+*.pyc
+_site/
+# season data is built by GitHub Actions on deploy
+data/*
+!data/.gitkeep
+# editor / tooling
+.claude/
+.vscode/
+.DS_Store
+Thumbs.db
