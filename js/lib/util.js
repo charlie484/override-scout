@@ -70,8 +70,17 @@ export function fmtTime(v) {
   const d = toDate(v); if (!d) return '';
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
+// Event dates come from the API as midnight US Eastern ("2026-10-18T00:00:00-04:00"); treat them as calendar days.
+export function dayOf(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : toDate(v);
+}
+export const eventDays = (e) => {
+  const s = dayOf(e && e.start), en = dayOf(e && e.end) || s;
+  return s && en ? Math.round((en - s) / 86400000) + 1 : 1;
+};
 export function fmtDateRange(a, b) {
-  const s = toDate(a), e = toDate(b);
+  const s = dayOf(a), e = dayOf(b);
   if (!s) return '—';
   if (!e || s.toDateString() === e.toDateString()) return fmtDate(s);
   if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
@@ -144,15 +153,12 @@ export function matchSortKey(m) {
 
 export function eventStatus(e, now = new Date()) {
   if (!e) return 'unknown';
-  const s = toDate(e.start), en = toDate(e.end);
-  if (e.ongoing) return 'live';
-  if (s && s > now) return 'upcoming';
-  if (en) {
-    const endOfDay = new Date(en); endOfDay.setHours(23, 59, 59, 999);
-    if (now <= endOfDay && s && s <= now) return 'live';
-    if (endOfDay < now) return 'past';
-  }
-  return s && s <= now ? 'past' : 'upcoming';
+  const s = dayOf(e.start), en = dayOf(e.end) || s;
+  if (!s) return e.ongoing ? 'live' : 'unknown';
+  const endOfDay = new Date(en); endOfDay.setHours(23, 59, 59, 999);
+  if (now < s) return 'upcoming';
+  if (now <= endOfDay) return 'live';
+  return 'past';
 }
 
 export function eventPlace(e) {

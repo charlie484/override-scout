@@ -1,6 +1,6 @@
 import { html, useState, useMemo, useEffect } from '../lib/html.js';
 import { Icon } from '../lib/icons.js';
-import { cx, fmt, pct, fmtDate, fmtDateRange, eventStatus, eventPlace, sortBy, groupBy, ordinal, matchSortKey, toDate } from '../lib/util.js';
+import { cx, fmt, pct, fmtDate, fmtDateRange, eventStatus, eventPlace, sortBy, groupBy, ordinal, matchSortKey, toDate, dayOf } from '../lib/util.js';
 import { useStore, myTeam, openSheet, closeSheet, saveDoc, liveDocs, toast, getState } from '../lib/state.js';
 import { setQuery, navigate } from '../lib/router.js';
 import { useData, findTeam, teamSeason, seasonId, skillsFor, isPlayed, resultFor, sideOf, seasonRatings } from '../lib/data.js';
@@ -195,8 +195,8 @@ export function EventRow({ e, extra }) {
   return html`<a class="row" href=${`#/event/${e.id}`}>
     <div class="avatar" style=${st === 'live' ? 'background:var(--loss-soft);color:var(--loss)' : ''}>
       <div style="text-align:center;line-height:1.05">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;opacity:.75">${toDate(e.start) ? toDate(e.start).toLocaleDateString(undefined, { month: 'short' }) : ''}</div>
-        <div style="font-size:16px">${toDate(e.start) ? toDate(e.start).getDate() : '?'}</div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;opacity:.75">${dayOf(e.start) ? dayOf(e.start).toLocaleDateString(undefined, { month: 'short' }) : ''}</div>
+        <div style="font-size:16px">${dayOf(e.start) ? dayOf(e.start).getDate() : '?'}</div>
       </div>
     </div>
     <div class="row-main">

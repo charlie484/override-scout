@@ -1,6 +1,6 @@
 import { html, useMemo } from '../lib/html.js';
 import { Icon } from '../lib/icons.js';
-import { cx, fmt, pct, ordinal, relTime, fmtTime, fmtDateRange, eventStatus, eventPlace, sortBy, matchLabel, matchSortKey, toDate } from '../lib/util.js';
+import { cx, fmt, pct, ordinal, relTime, fmtTime, fmtDateRange, eventStatus, eventPlace, sortBy, matchLabel, matchSortKey, toDate, dayOf, eventDays } from '../lib/util.js';
 import { useStore, openSheet, liveDocs } from '../lib/state.js';
 import { useData, findTeam, teamSeason, seasonId, skillsFor, eventData, isPlayed, sideOf, resultFor, seasonRatings, manifest, teamIndex } from '../lib/data.js';
 import { hasLive } from '../lib/api.js';
@@ -40,7 +40,11 @@ export function Home() {
   const rec = useMemo(() => (d ? teamRecord(d.matches, num) : null), [d, num]);
 
   const events = d ? d.events : [];
-  const liveEvent = events.find((e) => eventStatus(e) === 'live');
+  // Event Day: a tournament happening now, or a multi-week league only on days we have a match.
+  const live = events.filter((e) => eventStatus(e) === 'live');
+  const today = new Date().toDateString();
+  const matchToday = (e) => d && d.matches.some((m) => m.event && m.event.id === e.id && m.scheduled && toDate(m.scheduled).toDateString() === today);
+  const liveEvent = live.find((e) => eventDays(e) <= 3) || live.find((e) => matchToday(e));
   const nextEvent = sortBy(events.filter((e) => eventStatus(e) === 'upcoming'), (e) => e.start)[0];
   const notes = liveDocs(docs, 'scout').slice(0, 3);
 
@@ -84,7 +88,8 @@ export function Home() {
 }
 
 function NextEvent({ e }) {
-  const days = Math.ceil((toDate(e.start) - new Date()) / 86400000);
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  const days = Math.round((dayOf(e.start) - startOfToday) / 86400000);
   return html`<a class="card card-pad" href=${`#/event/${e.id}`} style="display:flex;gap:14px;align-items:center">
     <div class="avatar brand" style="width:56px;height:56px;border-radius:16px;flex-direction:column;display:flex;justify-content:center">
       <div style="font-size:22px;font-weight:900;line-height:1">${Math.max(0, days)}</div><div style="font-size:10px;font-weight:700">${days === 1 ? 'DAY' : 'DAYS'}</div>

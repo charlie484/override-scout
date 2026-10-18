@@ -659,7 +659,8 @@ def fixture():
                       'program': {'id': 1, 'name': 'VEX V5 Robotics Competition', 'code': 'V5RC'}, 'registered': True})
         strength[n] = rnd.gauss(30, 12)
     strength['1940D'] = 38
-    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_now = dt.datetime.now().astimezone()  # fixture dates follow this computer's calendar day
+    today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     plan = [(-60, 'Test Kickoff Scrimmage'), (-42, 'Test Spring Showdown'), (-28, 'Test State Qualifier'), (-14, 'Test Signature Event'),
             (0, 'Test Live Tournament (today)'), (12, 'Test Regional Championship')]
     events, bundles = [], {}
