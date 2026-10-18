@@ -35,9 +35,12 @@ function buildQuery(params = {}) {
 }
 
 // ---- request queue: a few requests at a time, backing off when the API says so ----
-const MAX_ACTIVE = 4;
+const MAX_ACTIVE = 3;
+const SPACING = 120; // ms between request starts; the API also limits short bursts
+const BACKOFF = [2000, 5000, 10000, 20000];
 let active = 0;
 let pausedUntil = 0;
+let lastStart = 0;
 const waiting = [];
 
 function schedule(task) {
@@ -48,9 +51,10 @@ function schedule(task) {
 }
 async function pump() {
   if (active >= MAX_ACTIVE || !waiting.length) return;
-  const wait = pausedUntil - Date.now();
-  if (wait > 0) { setTimeout(pump, wait + 20); return; }
+  const wait = Math.max(pausedUntil - Date.now(), lastStart + SPACING - Date.now());
+  if (wait > 0) { setTimeout(pump, wait + 10); return; }
   const job = waiting.shift();
+  lastStart = Date.now();
   active++;
   try { job.resolve(await job.task()); } catch (e) { job.reject(e); } finally { active--; pump(); }
   pump();
@@ -67,13 +71,17 @@ async function request(url, { auth = true } = {}, attempt = 0) {
     throw new ApiError(navigator.onLine ? 'Could not reach events.vex.com' : 'You are offline', 0);
   }
   const remaining = Number(res.headers.get('x-ratelimit-remaining'));
-  if (!Number.isNaN(remaining) && remaining < 3) pausedUntil = Math.max(pausedUntil, Date.now() + 1500);
-  if (res.status === 429 && attempt < 4) {
+  if (res.headers.get('x-ratelimit-remaining') !== null && !Number.isNaN(remaining) && remaining <= 2) {
+    pausedUntil = Math.max(pausedUntil, Date.now() + 10000);
+  }
+  if (res.status === 429 && attempt < BACKOFF.length) {
+    // Retry-After isn't readable cross-origin (and is sometimes 0), so back off on our own schedule
     const ra = Number(res.headers.get('retry-after'));
-    pausedUntil = Date.now() + (ra > 0 ? ra * 1000 : 1500 * (attempt + 1));
+    pausedUntil = Date.now() + Math.max(ra > 0 ? ra * 1000 : 0, BACKOFF[attempt]);
     await sleep(pausedUntil - Date.now());
     return request(url, { auth }, attempt + 1);
   }
+  if (res.status === 429) throw new ApiError('events.vex.com is busy — try again in a minute', 429);
   if (res.status === 401 || res.status === 403) throw new NoAuthError(token ? 'The VEX API key was rejected — check it in Settings' : undefined);
   if (res.status === 404) throw new ApiError('Not found', 404);
   if (!res.ok) {

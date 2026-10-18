@@ -48,12 +48,21 @@ def parse_time(s):
 # ---------------------------------------------------------------------------
 # API client with polite rate limiting and an on-disk cache
 # ---------------------------------------------------------------------------
+class RateLimited(Exception):
+    """The API kept answering 429 even after backing off."""
+
+
+# Waits after a 429 when the API gives no usable Retry-After (it sometimes sends 0).
+BACKOFF = [20, 40, 80, 160, 300, 300]
+
+
 class Api:
-    def __init__(self, token: str, min_interval: float = 0.35):
+    def __init__(self, token: str, min_interval: float = 1.25):
         self.token = token
         self.min_interval = min_interval
         self.last = 0.0
         self.calls = 0
+        self.limit_logged = False
 
     def get(self, path: str, params: dict | None = None, attempt: int = 0):
         q = []
@@ -73,14 +82,21 @@ class Api:
         self.calls += 1
         try:
             with urllib.request.urlopen(req, timeout=60) as res:
+                limit = res.headers.get('x-ratelimit-limit')
                 remaining = res.headers.get('x-ratelimit-remaining')
-                if remaining is not None and remaining.isdigit() and int(remaining) < 5:
-                    time.sleep(3)
+                if not self.limit_logged and limit:
+                    log(f'  API rate limit: {limit} requests per window')
+                    self.limit_logged = True
+                if remaining is not None and remaining.isdigit() and int(remaining) <= 2:
+                    log('  close to the rate limit, pausing 61s')
+                    time.sleep(61)
                 return json.loads(res.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 6:
+            if e.code == 429:
+                if attempt >= len(BACKOFF):
+                    raise RateLimited(path)
                 ra = e.headers.get('retry-after')
-                delay = int(ra) if ra and ra.isdigit() else 10 * (attempt + 1)
+                delay = max(int(ra) if ra and ra.isdigit() else 0, BACKOFF[attempt])
                 log(f'  rate limited, waiting {delay}s')
                 time.sleep(delay)
                 return self.get(path, params, attempt + 1)
@@ -172,50 +188,72 @@ def gather_live(api: Api, program: str, cache: Cache, max_events: int | None):
     log(f'{len(events)} events in season')
     cache.save(f'season_{program}', season)
     cache.save(f'events_{sid}', events)
-    bundles = {}
-    fetched = 0
-    for ev in sorted(events, key=lambda e: e.get('start') or ''):
-        start, end = parse_time(ev.get('start')), parse_time(ev.get('end')) or parse_time(ev.get('start'))
-        key = f'ev_{ev["id"]}'
-        cached = cache.load(key)
-        if start and start > NOW:
-            # upcoming: refresh the team list daily for events in the next 3 weeks
-            if (start - NOW).days <= 21:
-                if not cached or (NOW - parse_time(cached['fetched'])).total_seconds() > 86400:
-                    cached = fetch_event_bundle(api, ev, cache, teams_only=True)
-                    cache.save(key, cached)
-                    fetched += 1
-            if cached:
-                cached['event'] = ev
-                bundles[ev['id']] = cached
-            continue
-        recent = end is None or (NOW - end).days < 5
-        if cached and cached.get('final') and not cached.get('teams_only') and not recent:
-            bundles[ev['id']] = cached
-            continue
-        if max_events is not None and fetched >= max_events:
-            if cached:
-                bundles[ev['id']] = cached
-            continue
-        log(f'  fetching {ev["sku"]} {ev["name"][:60]}')
-        b = fetch_event_bundle(api, ev, cache)
-        cache.save(key, b)
-        bundles[ev['id']] = b
-        fetched += 1
-    # registered teams (refresh daily)
+    limited = False
+
+    # 1. Registered teams first (refreshed daily): this powers team search for everyone.
     teams = cache.load(f'teams_{sid}')
     if not teams or (NOW - parse_time(teams['fetched'])).total_seconds() > 86400:
         log('Fetching registered teams')
-        teams = {'fetched': NOW.isoformat(), 'list': api.all('/teams', {'program[]': [PROGRAM_IDS[program]], 'registered': True})}
-        cache.save(f'teams_{sid}', teams)
-    qa = api.get(f'/seasons/{sid}/qa')
-    judging = api.get('/judging/qa')
-    if qa:
-        cache.save(f'qa_{sid}', qa)
-    if judging:
-        cache.save('qa_judging', judging)
-    log(f'API calls this run: {api.calls}')
-    return season, events, bundles, teams['list'], qa, judging
+        try:
+            teams = {'fetched': NOW.isoformat(), 'list': api.all('/teams', {'program[]': [PROGRAM_IDS[program]], 'registered': True})}
+            cache.save(f'teams_{sid}', teams)
+            log(f'  {len(teams["list"])} registered teams')
+        except RateLimited:
+            log('::warning::Rate limited while fetching teams; using the cached list')
+            limited = True
+    teams_list = (teams or {}).get('list', [])
+
+    # 2. Official Q&A (two calls)
+    qa, judging = cache.load(f'qa_{sid}'), cache.load('qa_judging')
+    if not limited:
+        try:
+            qa = api.get(f'/seasons/{sid}/qa') or qa
+            judging = api.get('/judging/qa') or judging
+            if qa:
+                cache.save(f'qa_{sid}', qa)
+            if judging:
+                cache.save('qa_judging', judging)
+        except RateLimited:
+            limited = True
+
+    # 3. Events: running / just-finished first, then older events newest-first, then upcoming team lists.
+    bundles, todo = {}, []
+    for ev in events:
+        start, end = parse_time(ev.get('start')), parse_time(ev.get('end')) or parse_time(ev.get('start'))
+        key = f'ev_{ev["id"]}'
+        cached = cache.load(key)
+        if cached:
+            cached['event'] = ev
+            bundles[ev['id']] = cached
+        if start and start > NOW:
+            stale = not cached or (NOW - parse_time(cached['fetched'])).total_seconds() > 86400
+            if (start - NOW).days <= 21 and stale:
+                todo.append((2, -start.timestamp(), ev, True))
+            continue
+        recent = end is None or (NOW - end).days < 5
+        if cached and cached.get('final') and not cached.get('teams_only') and not recent:
+            continue
+        todo.append((0 if recent else 1, -(start.timestamp() if start else 0), ev, False))
+    todo.sort(key=lambda x: (x[0], x[1]))
+    log(f'{len(todo)} events to download ({sum(1 for t in todo if t[0] == 0)} running or just finished)')
+
+    fetched = 0
+    for _, _, ev, teams_only in todo:
+        if limited or (max_events is not None and fetched >= max_events):
+            break
+        log(f'  fetching {ev["sku"]} {ev["name"][:60]}{" (teams)" if teams_only else ""}')
+        try:
+            b = fetch_event_bundle(api, ev, cache, teams_only=teams_only)
+        except RateLimited:
+            log('::warning::VEX API kept rate limiting; publishing what is downloaded so far (the next run continues)')
+            limited = True
+            break
+        cache.save(f'ev_{ev["id"]}', b)
+        bundles[ev['id']] = b
+        fetched += 1
+    left = len(todo) - fetched
+    log(f'Downloaded {fetched} events this run, {left} still to fetch. API calls: {api.calls}')
+    return season, events, bundles, teams_list, qa, judging
 
 
 def gather_cached(program: str, cache: Cache):
@@ -725,6 +763,9 @@ def main():
                 log('::error::The VEX API rejected VEX_API_TOKEN (check the repository secret)')
             else:
                 log(f'::warning::VEX API error {e.code}; rebuilding from cache')
+            season, events, bundles, teams, qa, judging = gather_cached(args.program, cache)
+        except RateLimited:
+            log('::warning::VEX API rate limited before any downloads; rebuilding from cache')
             season, events, bundles, teams, qa, judging = gather_cached(args.program, cache)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             log(f'::warning::VEX API unreachable ({e}); rebuilding from cache')

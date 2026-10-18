@@ -44,7 +44,8 @@ jobs:
           if [ -z "$VEX_API_TOKEN" ]; then
             echo "::warning::Add a VEX_API_TOKEN repository secret to publish TrueSkill and season stats."
           else
-            python scripts/build_data.py --out data --max-events 500 || echo "::warning::Season data build failed; deploying the app without fresh stats."
+            # ~400 events per run keeps the job under an hour at the API's pace; later runs pick up the rest
+            python scripts/build_data.py --out data --max-events 400 || echo "::warning::Season data build failed; deploying the app without fresh stats."
           fi
 
       - name: Assemble site
