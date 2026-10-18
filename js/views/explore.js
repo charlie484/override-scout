@@ -188,14 +188,13 @@ function TrueSkillTab() {
     </div>
     <div class="mt-12"><${SearchBox} value=${text} onInput=${setText} placeholder="Filter teams" /></div>
     <div class="table-wrap mt-12"><table class="table">
-      <thead><tr><th>#</th><th class="left">Team</th><th>TrueSkill</th><th>W-L-T</th><th>OPR</th><th>CCWM</th><th>World</th></tr></thead>
+      <thead><tr><th>#</th><th class="left">Team</th><th>TS</th><th>W-L-T</th><th>OPR</th><th>CCWM</th></tr></thead>
       <tbody>${rows.slice(0, limit).map((r, i) => html`<tr class=${cx('clickable', r.number === myTeam() && 'me')} onClick=${() => navigate('/team/' + r.number)}>
         <td class="muted">${i + 1}</td>
-        <td class="left team">${r.number}<small>${r.name}</small></td>
+        <td class="left team">${r.number}<small>${(ctry || grade || text) ? `#${fmt(r.tsRank)} world · ` : ''}${r.name || ''}</small></td>
         <td class="strong brand-text">${fmt(r.ts, 1)}</td>
         <td>${r.w}-${r.l}-${r.t}</td>
         <td>${fmt(r.opr, 1)}</td><td>${fmt(r.ccwm, 1)}</td>
-        <td class="muted">${fmt(r.tsRank)}</td>
       </tr>`)}</tbody>
     </table></div>
     ${rows.length > limit && html`<div class="center mt-12"><button class="btn" onClick=${() => setLimit(limit + 200)}>Show more (${fmt(rows.length - limit)} left)</button></div>`}
@@ -232,13 +231,12 @@ function SkillsTab() {
     ${q.error && !q.data ? html`<div class="mt-12"><${ErrorState} error=${q.error} onRetry=${q.refresh} /></div>`
       : q.loading && !q.data ? html`<div class="mt-12"><${Skeleton} rows=${8} /></div>`
       : html`<div class="table-wrap mt-12"><table class="table">
-        <thead><tr><th>#</th><th class="left">Team</th><th>Total</th><th>Auton</th><th>Driver</th><th>World</th></tr></thead>
+        <thead><tr><th>#</th><th class="left">Team</th><th>Total</th><th>Auton</th><th>Driver</th></tr></thead>
         <tbody>${rows.slice(0, limit).map((e, i) => html`<tr class=${cx('clickable', e.team.team === myTeam() && 'me')} onClick=${() => navigate('/team/' + e.team.team)}>
           <td class="muted">${i + 1}</td>
-          <td class="left team">${e.team.team}<small>${e.team.teamName}</small></td>
+          <td class="left team">${e.team.team}<small>${(ctry || text) ? `#${e.rank} world · ` : ''}${e.team.teamName}</small></td>
           <td class="strong brand-text">${e.scores.score}</td>
           <td>${e.scores.programming}</td><td>${e.scores.driver}</td>
-          <td class="muted">${e.rank}</td>
         </tr>`)}</tbody>
       </table></div>
       ${rows.length > limit && html`<div class="center mt-12"><button class="btn" onClick=${() => setLimit(limit + 200)}>Show more</button></div>`}

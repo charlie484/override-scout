@@ -512,6 +512,12 @@ button.match:hover { background: var(--hover); }
 .table td.muted { color: var(--text-3); }
 .table td.team { font-weight: 800; }
 .table td.team small { display: block; font-weight: 500; color: var(--text-3); font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 480px) {
+  .table { font-size: 13px; }
+  .table th, .table td { padding: 9px 7px; }
+  .table th:first-child, .table td:first-child { padding-left: 11px; }
+  .table td.team small { max-width: 104px; }
+}
 
 /* ---------- Sheets / dialogs ---------- */
 .sheet-wrap { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; }
