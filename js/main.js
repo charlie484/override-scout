@@ -177,9 +177,11 @@ if ('serviceWorker' in navigator && !isDev) {
   });
   navigator.serviceWorker.register('sw.js').then((reg) => {
     const prompt = (worker) => toast('A new version is ready', {
-      icon: 'sparkles', action: 'Update', duration: 15000, onAction: () => worker.postMessage('skipWaiting')
+      icon: 'sparkles', action: 'Update', duration: 30000, onAction: () => worker.postMessage('skipWaiting')
     });
-    if (reg.waiting && navigator.serviceWorker.controller) prompt(reg.waiting);
+    // An update downloaded during an earlier visit: apply it now, while the app is just opening
+    // (nothing typed yet), so phones never get stuck on an old version.
+    if (reg.waiting && navigator.serviceWorker.controller) reg.waiting.postMessage('skipWaiting');
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       w && w.addEventListener('statechange', () => {
